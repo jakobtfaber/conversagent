@@ -1,16 +1,16 @@
 # Cerebras + Stagehand + Cartesia Voice Browser 🚀🗣️
 
-Voice-controlled, AI-powered web automation built with **C**, **Playwright**, and **Cartesia Ink Whisper** streaming speech-to-text, with direct command execution for natural browser control.
+Voice-controlled, AI-powered web automation built with **Cerebras**, **Playwright**, and **Cartesia Ink Whisper** streaming speech-to-text, with direct command execution for natural browser control. 
 
 ---
 
 ## ✨ Key Features
 
-1. **Natural-language browser control** – Say commands like "*Click the sign-in button*" and Stagehand executes them.
-2. **Continuous Voice Streaming** – Speak naturally; no button presses required.
-3. **Real-time STT (Cartesia)** – Fast, accurate transcription via Cartesia's streaming ink-whisper model.
-4. **Direct Command Execution** – Scroll commands are handled instantly, other commands go directly to Stagehand.
-5. **Smooth Scrolling** – Built-in smooth scroll animations for better user experience.
+1. **Fast Inference** – Cerebras API powers the browser with ultra-fast LLM inference, enabling lightning fast command execution and responsive voice control.
+2. **Natural-language browser control** – Say commands like "*Click the sign-in button*" and Stagehand executes them.
+3. **Continuous Voice Streaming** – Speak naturally; no button presses required. Completely hands free.
+4. **Real-time STT (Cartesia)** – Fast, accurate transcription via Cartesia's streaming ink-whisper model.
+5. **Direct Command Execution** – Scroll commands are handled instantly, other commands go directly to Stagehand.
 6. **Cross-platform** – macOS / Linux (requires FFmpeg).e
 
 
@@ -42,7 +42,7 @@ Create a `.env`:
 # Cartesia streaming speech-to-text
 CARTESIA_API_KEY=your_cartesia_key
 
-# Cerebras (optional - for Stagehand LLM calls)
+# Cerebras - powers the system
 CEREBRAS_API_KEY=your_cerebras_key
 ```
 

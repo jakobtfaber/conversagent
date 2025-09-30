@@ -15,7 +15,7 @@ const StagehandConfig: ConstructorParams = {
     modelName: "llama-3.3-70b", // better models work better
     client: new OpenAI({
       baseURL: "https://api.cerebras.ai/v1",
-      apiKey: process.env.CEREBRAS_API_KEY!,
+      apiKey: process.env.CEREBRAS_API_KEY!, //get your key here: https://cloud.cerebras.ai/?utm_source=inferencedocs
     }),
   }),
 
@@ -24,8 +24,6 @@ const StagehandConfig: ConstructorParams = {
 
   // Disable caching to avoid storing large payloads
   enableCaching: false, //Important. Dont change this
-
-
 
   // Browser configuration
   env: "LOCAL" /* Environment to run in: LOCAL or BROWSERBASE */,
@@ -38,14 +36,14 @@ const StagehandConfig: ConstructorParams = {
     browserSettings: {
       blockAds: true,
       viewport: {
-        width: 1024,
+        width: 1366,
         height: 768,
       },
     },
   },
   localBrowserLaunchOptions: {
     viewport: {
-      width: 1024,
+      width: 1366,
       height: 768,
     },
   } /* Configuration options for the local browser */,
