@@ -10,3 +10,129 @@ venv/
 transcripts/
 structuredoutput.txt
 command.mp3
+
+# Environment files
+.env.local
+.env.*.local
+.envrc
+
+# Python: virtual environments
+.venv
+.venv/
+env/
+.env/
+.python-version
+
+# Python: bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyrightcache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+pip-wheel-metadata/
+pip-log.txt
+pip-delete-this-directory.txt
+
+
+# Node/JS: logs and caches
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+.pnpm-store/
+.yarn/
+.pnp.*
+
+# Node/JS: build artifacts
+build/
+out/
+.next/
+.turbo/
+.parcel-cache/
+.nyc_output/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Playwright/Test artifacts
+playwright-report/
+test-results/
+playwright/
+screenshots/
+videos/
+
+# Editors/IDE
+.vscode/
+.idea/
+.history/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+
+# Audio and temp data
+*.wav
+*.mp3
+*.raw
+*.flac
+*.m4a
+*.tmp
+*.temp
+
+# Non-core files (not needed for index.ts functionality)
+# Python STT scripts
+*.py
+requirements.txt
+setup.sh
+
+# Demo and test files
+*_demo.*
+*_test.*
+test.*
+mic_test.*
+livekit_demo.*
+
+# Documentation and notes
+*.txt
+*.md
+!README.md
+
+# Generated files
+generate_token.py
+voicebrowser/
+
+# Additional non-core files
+audiodocs.txt
+cartesia.txt
+simple_stt.txt
+LIVEKIT_DEMO_README.md
+livekit_demo.html
+deepgram_stt.py
+local_stt_agent.py
+livekit_stt_demo.py
+stt_agent.py
+test_local_stt.py
+test.js
+test.raw
+utils.ts
+mic_test.py
+test_cerebras.ts
+test_local_stt.py
+test_stt.ts
+
+venv/bin

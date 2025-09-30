@@ -25,8 +25,6 @@ const StagehandConfig: ConstructorParams = {
   // Disable caching to avoid storing large payloads
   enableCaching: false, //Important. Dont change this
 
-
-
   // Browser configuration
   env: "LOCAL" /* Environment to run in: LOCAL or BROWSERBASE */,
   apiKey: process.env.BROWSERBASE_API_KEY /* API key for authentication */,
@@ -38,14 +36,14 @@ const StagehandConfig: ConstructorParams = {
     browserSettings: {
       blockAds: true,
       viewport: {
-        width: 1024,
+        width: 1366,
         height: 768,
       },
     },
   },
   localBrowserLaunchOptions: {
     viewport: {
-      width: 1024,
+      width: 1366,
       height: 768,
     },
   } /* Configuration options for the local browser */,

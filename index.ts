@@ -232,18 +232,18 @@ function startStreamingVoiceLoop(page: Page, stagehand: Stagehand): Promise<void
       const lower = trimmed.toLowerCase();
       
       // Handle explicit scroll commands first
-      if (lower.includes('scroll down')) {
+      if (lower.includes('scroll')) {
         console.log(chalk.yellow('Scrolling down 30vh…'));
         await page.evaluate(() => {
           window.scrollBy({
-            top: window.innerHeight * 0.6,
+            top: window.innerHeight * 0.8,
             left: 0,
             behavior: 'smooth'
           });
         });
         return;
       }
-      if (lower.includes('scroll up')) {
+      if (lower.includes('delete this ')) {
         console.log(chalk.yellow('Scrolling up 30vh…'));
         await page.evaluate(() => {
           window.scrollBy({
