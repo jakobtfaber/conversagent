@@ -44,11 +44,14 @@ function spawnPlayer() {
     "-ar", "44100",
     "-ac", "1",
     "-nodisp",
-    "-autoexit",
+    "-vn",
     "-loglevel", "quiet",
-    "pipe:0",
+    "-probesize", "32",
+    "-analyzeduration", "0",
+    "-i", "pipe:0",
   ]);
   player.on("error", (err) => console.error(chalk.red("ffplay error:"), err));
+  player.stdin.on("error", () => {}); // suppress broken pipe errors on early exit
   return player.stdin;
 }
 
