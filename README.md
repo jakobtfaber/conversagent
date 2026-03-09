@@ -1,8 +1,8 @@
 # Conversagent 🗣️🤖
 
-> A real-time, speech-to-speech Claude voice agent — speak naturally, hear Claude speak back.
+> A real-time, speech-to-speech voice agent — speak naturally, hear your chosen AI speak back.
 
-Forked from [ianb-cerebras/stagehand-voicebrowser](https://github.com/ianb-cerebras/stagehand-voicebrowser) and repurposed as a fully conversational agent powered by **Anthropic Claude** and **Cartesia** for both speech-to-text and text-to-speech.
+Forked from [ianb-cerebras/stagehand-voicebrowser](https://github.com/ianb-cerebras/stagehand-voicebrowser) and repurposed as a fully conversational agent. Supports **Anthropic Claude** and **Google Gemini** as the LLM, switchable via a single environment variable. Speech-to-text and text-to-speech are both powered by **Cartesia**.
 
 ---
 
@@ -10,15 +10,16 @@ Forked from [ianb-cerebras/stagehand-voicebrowser](https://github.com/ianb-cereb
 
 ```
 Microphone → Cartesia STT (ink-whisper, streaming)
-           → Claude API (claude-sonnet, streaming tokens)
+           → Claude or Gemini (streaming tokens, your choice)
            → Cartesia TTS (sonic-3, streaming audio)
            → Speakers (via ffplay)
 ```
 
-- **Streaming STT** — Cartesia's Ink Whisper model transcribes your speech in real time via WebSocket
-- **Claude agent** — Each transcript is sent to Claude with full conversation history for multi-turn memory
-- **Streaming TTS** — Claude's response tokens are piped directly into Cartesia's TTS WebSocket as they arrive, so playback starts before Claude finishes generating
-- **Mic gating** — The microphone pauses while Claude is speaking to prevent feedback loops
+- **Streaming STT** — Cartesia Ink Whisper transcribes your speech in real time via WebSocket
+- **Pluggable LLM** — Switch between Anthropic Claude and Google Gemini with `LLM_PROVIDER` in your `.env`
+- **Streaming TTS** — LLM response tokens are piped directly into Cartesia TTS as they arrive, so playback starts before the model finishes generating
+- **Mic gating** — The microphone pauses while the agent is speaking to prevent feedback loops
+- **Multi-turn memory** — Full conversation history is maintained across the session
 
 ---
 
@@ -47,10 +48,33 @@ cp .env.example .env
 # Edit .env and fill in your keys
 ```
 
-**`.env`**
+---
+
+## ⚙️ Configuration
+
+All configuration lives in your `.env` file:
+
+```bash
+# Required for both STT and TTS
+CARTESIA_API_KEY=your_cartesia_key        # https://play.cartesia.ai/keys
+
+# Choose your LLM provider: "anthropic" (default) or "google"
+LLM_PROVIDER=anthropic
+
+# Required if LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_anthropic_key      # https://console.anthropic.com/
+# ANTHROPIC_MODEL=claude-sonnet-4-5-20250929   # optional override
+
+# Required if LLM_PROVIDER=google
+GOOGLE_API_KEY=your_google_key            # https://aistudio.google.com/app/apikey
+# GOOGLE_MODEL=gemini-1.5-flash               # optional override
 ```
-CARTESIA_API_KEY=your_cartesia_key     # https://play.cartesia.ai/keys
-ANTHROPIC_API_KEY=your_anthropic_key   # https://console.anthropic.com/
+
+### Switching providers
+
+To use Google Gemini instead of Claude, just change one line in your `.env`:
+```
+LLM_PROVIDER=google
 ```
 
 ---
@@ -61,15 +85,15 @@ ANTHROPIC_API_KEY=your_anthropic_key   # https://console.anthropic.com/
 npm start
 ```
 
-The agent will print:
+Output:
 ```
 🗣️  Conversagent — Claude Voice Agent
-Powered by Anthropic Claude + Cartesia STT/TTS
+LLM: Anthropic Claude (claude-sonnet-4-5-20250929) · STT/TTS: Cartesia
 
 🎤 Listening... (Ctrl+C to exit)
 ```
 
-Speak naturally. Claude will respond in your speakers. The conversation is multi-turn — Claude remembers everything said in the session.
+Speak naturally. The agent responds in your speakers. The conversation is multi-turn — context is retained for the full session.
 
 ---
 
@@ -77,28 +101,15 @@ Speak naturally. Claude will respond in your speakers. The conversation is multi
 
 | Say | Result |
 |-----|--------|
-| Anything | Claude responds conversationally |
+| Anything | Agent responds conversationally |
 | "exit" / "quit" / "stop" / "goodbye" | Shuts down gracefully |
-
----
-
-## ⚙️ Configuration
-
-Edit the constants at the top of `index.ts` to customize:
-
-| Constant | Default | Description |
-|----------|---------|-------------|
-| `VOICE_ID` | `6ccbfb76-...` | Cartesia voice ID — browse at [play.cartesia.ai/voices](https://play.cartesia.ai/voices) |
-| `TTS_MODEL` | `sonic-3` | Cartesia TTS model |
-| `STT_MODEL` | `ink-whisper` | Cartesia STT model |
-| `CLAUDE_MODEL` | `claude-sonnet-4-5-20250929` | Anthropic model |
 
 ---
 
 ## 🧱 Project structure
 
 ```
-index.ts          ← Main agent loop (STT → Claude → TTS)
+index.ts          ← Main agent loop (STT → LLM → TTS)
 package.json      ← Dependencies
-.env.example      ← API key template
+.env.example      ← API key + config template
 ```
