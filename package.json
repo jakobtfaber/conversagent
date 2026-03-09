@@ -8,6 +8,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@cartesia/cartesia-js": "^3.0.0",
+    "@google/generative-ai": "^0.21.0",
     "boxen": "^8.0.1",
     "chalk": "^5.3.0",
     "dotenv": "^16.4.7",
