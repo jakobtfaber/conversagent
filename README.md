@@ -1,18 +1,24 @@
-# Cerebras + Stagehand + Cartesia Voice Browser 🚀🗣️
+# Conversagent 🗣️🤖
 
-Voice-controlled, AI-powered web automation built with **Cerebras**, **Playwright**, and **Cartesia Ink Whisper** streaming speech-to-text, with direct command execution for natural browser control. 
+> A real-time, speech-to-speech Claude voice agent — speak naturally, hear Claude speak back.
+
+Forked from [ianb-cerebras/stagehand-voicebrowser](https://github.com/ianb-cerebras/stagehand-voicebrowser) and repurposed as a fully conversational agent powered by **Anthropic Claude** and **Cartesia** for both speech-to-text and text-to-speech.
 
 ---
 
-## ✨ Key Features
+## ✨ How it works
 
-1. **Fast Inference** – Cerebras API powers the browser with ultra-fast LLM inference, enabling lightning fast command execution and responsive voice control.
-2. **Natural-language browser control** – Say commands like "*Click the sign-in button*" and Stagehand executes them.
-3. **Continuous Voice Streaming** – Speak naturally; no button presses required. Completely hands free.
-4. **Real-time STT (Cartesia)** – Fast, accurate transcription via Cartesia's streaming ink-whisper model.
-5. **Direct Command Execution** – Scroll commands are handled instantly, other commands go directly to Stagehand.
-6. **Cross-platform** – macOS / Linux (requires FFmpeg).e
+```
+Microphone → Cartesia STT (ink-whisper, streaming)
+           → Claude API (claude-sonnet, streaming tokens)
+           → Cartesia TTS (sonic-3, streaming audio)
+           → Speakers (via ffplay)
+```
 
+- **Streaming STT** — Cartesia's Ink Whisper model transcribes your speech in real time via WebSocket
+- **Claude agent** — Each transcript is sent to Claude with full conversation history for multi-turn memory
+- **Streaming TTS** — Claude's response tokens are piped directly into Cartesia's TTS WebSocket as they arrive, so playback starts before Claude finishes generating
+- **Mic gating** — The microphone pauses while Claude is speaking to prevent feedback loops
 
 ---
 
@@ -20,59 +26,79 @@ Voice-controlled, AI-powered web automation built with **Cerebras**, **Playwrigh
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Node.js | ≥ 18 | Stagehand & Playwright |
-| FFmpeg  | any  | Audio device capture |
-
-(Cartesia handles transcription in the cloud – no Python or local models required.)
+| Node.js | ≥ 18 | |
+| FFmpeg / SoX | any | Audio capture (`rec`) and playback (`ffplay`) |
 
 ---
 
-## 🏗️  Setup
+## 🏗️ Setup
 
 ```bash
-# 1. Clone & install JS deps
-npm install
+# 1. Clone and install
+git clone https://github.com/jakobtfaber/conversagent.git
+cd conversagent
+pnpm install   # or: npm install
 
-# 2. (Optional) Install FFmpeg if missing – macOS: brew install ffmpeg
+# 2. Install FFmpeg if missing (macOS)
+brew install ffmpeg
+
+# 3. Configure API keys
+cp .env.example .env
+# Edit .env and fill in your keys
 ```
 
-Create a `.env`:
-
-```bash
-# Cartesia streaming speech-to-text
-CARTESIA_API_KEY=your_cartesia_key
-
-# Cerebras - powers the system
-CEREBRAS_API_KEY=your_cerebras_key
+**`.env`**
+```
+CARTESIA_API_KEY=your_cartesia_key     # https://play.cartesia.ai/keys
+ANTHROPIC_API_KEY=your_anthropic_key   # https://console.anthropic.com/
 ```
 
 ---
 
-## ▶️  Running
+## ▶️ Running
 
 ```bash
 npm start
 ```
 
-1. A headless browser launches and navigates to Google.
-2. Terminal prints: `🎤 Cartesia streaming STT connected. Speak freely (Ctrl+C to exit)`
-3. Speak commands in natural language - streaming transcription happens automatically.
-4. Watch the command run or scroll.
+The agent will print:
+```
+🗣️  Conversagent — Claude Voice Agent
+Powered by Anthropic Claude + Cartesia STT/TTS
+
+🎤 Listening... (Ctrl+C to exit)
+```
+
+Speak naturally. Claude will respond in your speakers. The conversation is multi-turn — Claude remembers everything said in the session.
 
 ---
 
-## 🎙️  Command Cheatsheet
+## 🎙️ Voice commands
 
-| Voice phrase | Result |
-|--------------|--------|
-| “scroll down” | page scrolls 60vh down with smooth animation |
-| “scroll up” | page scrolls 30vh up with smooth animation |
-| anything else | forwarded to Stagehand `page.act` |
-| “exit / quit / stop” | shuts everything down |
+| Say | Result |
+|-----|--------|
+| Anything | Claude responds conversationally |
+| "exit" / "quit" / "stop" / "goodbye" | Shuts down gracefully |
 
 ---
 
-## ⚙️  Environment Variables
+## ⚙️ Configuration
 
-* `CARTESIA_API_KEY` – **required** for streaming speech-to-text transcription.
-* `CEREBRAS_API_KEY` – **required** for powering the whole system 
+Edit the constants at the top of `index.ts` to customize:
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `VOICE_ID` | `6ccbfb76-...` | Cartesia voice ID — browse at [play.cartesia.ai/voices](https://play.cartesia.ai/voices) |
+| `TTS_MODEL` | `sonic-3` | Cartesia TTS model |
+| `STT_MODEL` | `ink-whisper` | Cartesia STT model |
+| `CLAUDE_MODEL` | `claude-sonnet-4-5-20250929` | Anthropic model |
+
+---
+
+## 🧱 Project structure
+
+```
+index.ts          ← Main agent loop (STT → Claude → TTS)
+package.json      ← Dependencies
+.env.example      ← API key template
+```
