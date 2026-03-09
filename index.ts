@@ -1,358 +1,249 @@
 // @ts-nocheck
-import { Stagehand, Page, BrowserContext } from "@browserbasehq/stagehand";
-import StagehandConfig from "./stagehand.config.js";
-import chalk from "chalk";
-import boxen from "boxen";
+import Anthropic from "@anthropic-ai/sdk";
+import Cartesia from "@cartesia/cartesia-js";
+import { spawn } from "child_process";
 import dotenv from "dotenv";
-import fs from 'fs';
-import { OpenAI } from 'openai';
-import fetch from 'node-fetch';
-import path from "path";
+import chalk from "chalk";
 import WebSocket from "ws";
 
 dotenv.config();
 
-// Silence Stagehand's OPENAI_API_KEY warning by providing a dummy key if missing
-if (!process.env.OPENAI_API_KEY) { 
-  process.env.OPENAI_API_KEY = "dummy_key"; // prevents init error log
-}
+// ─── Config ──────────────────────────────────────────────────────────────────
 
-const logger = console; // Simple console logger for TypeScript
+const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// ------------------------------------------------------------
-// Cartesia STT via OpenAI-compatible API
-// ------------------------------------------------------------
+// A pleasant, neutral Cartesia voice. Swap for any voice ID from your account.
+// Browse voices at: https://play.cartesia.ai/voices
+const VOICE_ID = "6ccbfb76-1fc6-48f7-b71d-91ac6298247b";
+const TTS_MODEL = "sonic-3";
+const STT_MODEL = "ink-whisper";
+const CLAUDE_MODEL = "claude-sonnet-4-5-20250929";
 
-/**
- * Transcribe an audio file using Cartesia Ink Whisper model.
- * Returns the transcribed text.
- */
-async function transcribeWithCartesia(filePath: string): Promise<string> {
-  const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey) {
-    console.warn("CARTESIA_API_KEY not set – returning empty transcript"); //get your key herehttps://play.cartesia.ai/sign-up
-    return "";
-  }
+// Conversation history — grows turn-by-turn for multi-turn memory
+const history = [];
 
-  try {
-    const client = new OpenAI({
-      apiKey,
-      baseURL: "https://api.cartesia.ai",
-    } as any);
-
-    const response: any = await client.audio.transcriptions.create({
-      file: fs.createReadStream(filePath) as any,
-      model: "ink-whisper",
-      language: "en",
-      timestamp_granularities: ["word"],
-    } as any);
-
-    return response.text || "";
-  } catch (err) {
-    console.error("Cartesia API error:", err);
-    return "";
-  }
-}
-
-// ------------------------------------------------------------
-// Voice Transcription using Node.js Audio Recording + OpenAI Whisper
-// ------------------------------------------------------------
+// ─── Audio playback via ffplay ────────────────────────────────────────────────
 
 /**
- * Dynamically import and return the AudioRecorder constructor
+ * Spawn ffplay to consume raw PCM f32le at 44100 Hz from stdin.
+ * Returns the stdin WriteStream to pipe audio into.
  */
+function spawnPlayer() {
+  const player = spawn("ffplay", [
+    "-f", "f32le",
+    "-ar", "44100",
+    "-ac", "1",
+    "-nodisp",
+    "-autoexit",
+    "-loglevel", "quiet",
+    "pipe:0",
+  ]);
+  player.on("error", (err) => console.error(chalk.red("ffplay error:"), err));
+  return player.stdin;
+}
+
+// ─── TTS: stream Claude tokens → Cartesia → speaker ─────────────────────────
+
+/**
+ * Given a Claude streaming response, pipe each text_delta token into a
+ * Cartesia TTS WebSocket context and play audio chunks in real-time.
+ * Returns the full assistant text when done.
+ */
+async function streamTTS(claudeStream) {
+  const cartesia = new Cartesia({ apiKey: CARTESIA_API_KEY });
+  const ws = await cartesia.tts.websocket();
+  ws.on("error", (err) => console.error(chalk.red("Cartesia TTS WS error:"), err));
+
+  const ctx = ws.context({
+    model_id: TTS_MODEL,
+    voice: { mode: "id", id: VOICE_ID },
+    output_format: { container: "raw", encoding: "pcm_f32le", sample_rate: 44100 },
+  });
+
+  const playerStdin = spawnPlayer();
+  let fullText = "";
+
+  // Pipe Claude token stream into Cartesia TTS context as tokens arrive
+  const pushTokens = async () => {
+    for await (const event of claudeStream) {
+      if (
+        event.type === "content_block_delta" &&
+        event.delta.type === "text_delta"
+      ) {
+        const token = event.delta.text;
+        fullText += token;
+        process.stdout.write(chalk.cyan(token)); // mirror to terminal
+        await ctx.push({ transcript: token });
+      }
+    }
+    await ctx.no_more_inputs();
+  };
+
+  // Receive audio chunks from Cartesia and pipe to ffplay
+  const receiveAudio = async () => {
+    for await (const event of ctx.receive()) {
+      if (event.type === "chunk" && event.audio) {
+        playerStdin.write(event.audio);
+      }
+    }
+    playerStdin.end();
+  };
+
+  // Run concurrently: push tokens while receiving + playing audio
+  await Promise.all([pushTokens(), receiveAudio()]);
+  ws.close();
+
+  console.log(); // newline after streamed text
+  return fullText;
+}
+
+// ─── STT: mic → Cartesia streaming WebSocket ─────────────────────────────────
+
 async function loadAudioRecorder() {
-    const { default: AudioRecorder } = await import('node-audiorecorder');
-    return AudioRecorder;
+  const { default: AudioRecorder } = await import("node-audiorecorder");
+  return AudioRecorder;
 }
 
 /**
- * Record audio from the microphone and save it as a file (default mp3).
- * @param filePath - Path to save the audio file.
- * @param duration - Duration of the recording in seconds.
+ * Open a Cartesia STT WebSocket and stream mic audio into it.
+ * Each final transcript fires onTranscript.
+ * Returns a cleanup() function.
  */
-async function recordAudio(filePath: string, duration = 20): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const AudioRecorder = await loadAudioRecorder();
+async function startSTT(onTranscript) {
+  const qs = new URLSearchParams({
+    model: STT_MODEL,
+    encoding: "pcm_s16le",
+    sample_rate: "16000",
+  }).toString();
 
-            const options = {
-                program: 'rec',
-                device: null,
-                bits: 16,
-                channels: 1,
-                encoding: 'signed-integer',
-                rate: 16000,
-                type: 'mp3',
-                silence: .5,
-                thresholdStart: 0.5,
-                thresholdStop: 0.3,
-                keepSilence: true
-            };
+  const sttWs = new WebSocket(`wss://api.cartesia.ai/stt/websocket?${qs}`, {
+    headers: {
+      "X-API-Key": CARTESIA_API_KEY,
+      "Cartesia-Version": "2025-04-16",
+    },
+  });
 
-            const audioRecorder = new AudioRecorder(options, console);
-            const writeStream = fs.createWriteStream(filePath);
+  const AudioRecorder = await loadAudioRecorder();
+  let recorder;
+  let isProcessing = false;
 
-            console.log(chalk.yellow("Recording audio..."));
-            audioRecorder.start().stream().pipe(writeStream);
-
-            audioRecorder.stream().on('error', (err: Error) => {
-                console.error(chalk.red("Recording error:"), err);
-                reject(err);
-            });
-
-            audioRecorder.stream().on('end', () => {
-                console.log(chalk.green("Recording complete."));
-                resolve();
-            });
-
-            setTimeout(() => {
-                audioRecorder.stop();
-            }, duration * 1000);
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-/**
- * Execute a given instruction by using Stagehand's AI capabilities.
- * @param commandText - The text instruction (transcribed).
- * @param page - The Stagehand (Playwright) page object.
- */
-async function executeAction(commandText: string, page: Page) {
-    try {
-        console.log(chalk.green("Executing command:"), commandText);
-        const actResult = await page.act({
-            action: commandText,
-        });
-        console.log(
-            chalk.green("Action complete using Stagehand."),
-            "\n",
-            chalk.gray(actResult)
-        );
-    } catch (error) {
-        console.error(chalk.red("Error executing action:"), error);
-    }
-}
-
-/**
- * Combine all steps of voice command handling:
- * 1. Record
- * 2. Transcribe
- * 3. Execute
- * 4. Cleanup
- */
-async function handleVoiceCommand(page: Page, audioFilePath = "command.mp3") {
-    try {
-        // 1. Record Audio
-        await recordAudio(audioFilePath);
-
-        // 2. Transcribe Audio
-        const transcribedText = await transcribeAudio(audioFilePath);
-        console.log(transcribedText)
-
-        
-
-        // 3. Execute Command
-        await executeAction(transcribedText, page);
-
-        // 4. Cleanup
-        fs.unlinkSync(audioFilePath);
-    } catch (error) {
-        console.error(chalk.red("Error handling voice command:"), error);
-        if (fs.existsSync(audioFilePath)) fs.unlinkSync(audioFilePath);
-    }
-}
-
-
-function startStreamingVoiceLoop(page: Page, stagehand: Stagehand): Promise<void> {
-  return new Promise(async (resolve) => {
-    const apiKey = process.env.CARTESIA_API_KEY;
-    if (!apiKey) {
-      throw new Error("CARTESIA_API_KEY not set");
-    }
-
-    const qs = new URLSearchParams({
-      model: "ink-whisper",
-      encoding: "pcm_s16le",
-      sample_rate: "16000",
-    }).toString();
-
-    const ws = new WebSocket(`wss://api.cartesia.ai/stt/websocket?${qs}`, {
-      headers: {
-        "X-API-Key": apiKey,
-        "Cartesia-Version": "2025-04-16",
-      },
-    });
-
-    ws.on("open", async () => {
-      console.log(chalk.yellow("🎤 Cartesia streaming STT connected. Speak freely (Ctrl+C to exit)"));
-
-      const AudioRecorder = await loadAudioRecorder();
-      const recorderOptions = {
+  function startRecorder() {
+    recorder = new AudioRecorder(
+      {
         program: "rec",
         device: null,
         bits: 16,
         channels: 1,
         encoding: "signed-integer",
         rate: 16000,
-        type: "raw", // send raw PCM without headers
+        type: "raw",
         silence: 0,
-      };
-
-      const recorder = new AudioRecorder(recorderOptions, console);
-      const micStream = recorder.start().stream();
-
-      micStream.on("data", (chunk: Buffer) => {
-        ws.send(chunk, { binary: true });
-      });
-
-      // Handle Ctrl+C for graceful shutdown
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-      process.stdin.on("data", async (key) => {
-        if (key === "\u0003") {
-          console.log(chalk.green("👋 Shutting down…"));
-          recorder.stop();
-          ws.send("finalize");
-          ws.send("done");
-          ws.close();
-          await stagehand.close();
-          resolve();
-          process.exit(0);
-        }
-      });
-    });
-
-    async function handleTranscript(text: string) {
-      const trimmed = text.trim();
-      if (trimmed.length < 4) return;     // ignore empty or 1-3 char fragments
-
-      const lower = trimmed.toLowerCase();
-      
-      // Handle explicit scroll commands first
-      if (lower.includes('scroll')) {
-        console.log(chalk.yellow('Scrolling down 30vh…'));
-        await page.evaluate(() => {
-          window.scrollBy({
-            top: window.innerHeight * 0.8,
-            left: 0,
-            behavior: 'smooth'
-          });
-        });
-        return;
-      }
-      if (lower.includes('delete this ')) {
-        console.log(chalk.yellow('Scrolling up 30vh…'));
-        await page.evaluate(() => {
-          window.scrollBy({
-            top: -window.innerHeight * 0.3,
-            left: 0,
-            behavior: 'smooth'
-          });
-        });
-        return;
-      }
-      
-      // Handle exit commands
-      if (["exit", "quit", "stop"].includes(lower)) {
-        console.log(chalk.green("👋 Voice exit detected – shutting down."));
-        ws.send("finalize");
-        ws.send("done");
-        ws.close();
-        await stagehand.close();
-        resolve();
-        process.exit(0);
-      }
-      
-      // For other commands, skip classification and execute directly with Stagehand
-      console.log(chalk.cyan("🎯 Executing Stagehand action:"), trimmed);
-      await executeAction(trimmed, page);
-    }
-
-    ws.on("message", async (data) => {
-      let msg: any;
-      try {
-        msg = JSON.parse(data.toString());
-      } catch {
-        console.log(chalk.gray("Non-JSON message:"), data.toString());
-        return; // ignore non-JSON messages
-      }
-
-      if (msg.type === "transcript" && msg.is_final) {
-        // Extract text from words array or use text field
-        const text = msg.words?.map((word: any) => word.word).join('') || msg.text || '';
-        if (text.trim().length >= 4) {
-          console.log(chalk.green("🎯 Final transcript:"), text);
-          await handleTranscript(text);
-        }
-      }
-    });
-
-    ws.on("close", () => {
-      console.log(chalk.gray("Cartesia WebSocket closed"));
-    });
-
-    ws.on("error", (err) => {
-      console.error(chalk.red("WebSocket error:"), err);
-    });
-  });
-}
-
-async function main({
-  page,
-  context,
-  stagehand,
-}: {
-  page: Page;
-  context: BrowserContext;
-  stagehand: Stagehand;
-}) {
-  console.log(chalk.cyan("🎭 Stagehand Voice Browser"));
-  console.log(chalk.yellow("🚀 Say commands; they'll be executed automatically.\n"));
-
-  await page.goto("https://www.google.com");
-
-  await startStreamingVoiceLoop(page, stagehand);
-}
-
-/**
- * This is the main function that runs when you npm run start
- */
-async function run() {
-  const stagehand = new Stagehand({
-    ...StagehandConfig,
-  });
-  await stagehand.init();
-
-  if (StagehandConfig.env === "BROWSERBASE" && stagehand.browserbaseSessionID) {
-    console.log(
-      boxen(
-        `View this session live in your browser: \n${chalk.blue(
-          `https://browserbase.com/sessions/${stagehand.browserbaseSessionID}`,
-        )}`,
-        {
-          title: "Browserbase",
-          padding: 1,
-          margin: 3,
-        },
-      ),
+      },
+      console
     );
+    recorder.start().stream().on("data", (chunk) => {
+      if (sttWs.readyState === WebSocket.OPEN && !isProcessing) {
+        sttWs.send(chunk, { binary: true });
+      }
+    });
   }
 
-  const page = stagehand.page;
-  const context = stagehand.context;
-  await main({
-    page,
-    context,
-    stagehand,
+  sttWs.on("open", () => {
+    console.log(chalk.yellow("\n🎤 Listening... (Ctrl+C to exit)\n"));
+    startRecorder();
   });
-  await stagehand.close();
-  console.log(
-    `\nDemo Complete",
-    )}\n`,
-  );
+
+  sttWs.on("message", async (data) => {
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+
+    if (msg.type === "transcript" && msg.is_final) {
+      const text =
+        msg.words?.map((w) => w.word).join("") || msg.text || "";
+      const trimmed = text.trim();
+      if (trimmed.length < 4 || isProcessing) return;
+
+      // Pause mic while Claude is thinking/speaking to avoid feedback loop
+      isProcessing = true;
+      recorder?.stop();
+
+      await onTranscript(trimmed);
+
+      // Resume listening after Claude finishes responding
+      isProcessing = false;
+      startRecorder();
+    }
+  });
+
+  sttWs.on("error", (err) => console.error(chalk.red("STT WS error:"), err));
+  sttWs.on("close", () => console.log(chalk.gray("STT WebSocket closed")));
+
+  return () => {
+    recorder?.stop();
+    try {
+      sttWs.send("finalize");
+      sttWs.close();
+    } catch {}
+  };
 }
 
-run();
+// ─── Main conversation loop ───────────────────────────────────────────────────
+
+async function handleTurn(userText) {
+  console.log(chalk.green(`\n👤 You: ${userText}`));
+  process.stdout.write(chalk.magenta("\n🤖 Claude: "));
+
+  history.push({ role: "user", content: userText });
+
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+
+  const claudeStream = anthropic.messages.stream({
+    model: CLAUDE_MODEL,
+    max_tokens: 1024,
+    system:
+      "You are a helpful voice assistant. Keep responses concise and conversational — " +
+      "you are speaking aloud, so avoid bullet points, markdown, or long lists. " +
+      "Aim for natural spoken language.",
+    messages: history,
+  });
+
+  const assistantText = await streamTTS(claudeStream);
+
+  history.push({ role: "assistant", content: assistantText });
+}
+
+async function main() {
+  console.log(chalk.cyan("🗣️  Conversagent — Claude Voice Agent"));
+  console.log(chalk.gray("Powered by Anthropic Claude + Cartesia STT/TTS\n"));
+
+  if (!CARTESIA_API_KEY) throw new Error("CARTESIA_API_KEY not set in .env");
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not set in .env");
+
+  const cleanup = await startSTT(async (text) => {
+    const lower = text.toLowerCase().trim();
+    if (["exit", "quit", "stop", "goodbye"].some((w) => lower.includes(w))) {
+      console.log(chalk.green("\n👋 Goodbye!"));
+      cleanup();
+      process.exit(0);
+    }
+    await handleTurn(text);
+  });
+
+  process.on("SIGINT", () => {
+    console.log(chalk.green("\n👋 Shutting down."));
+    cleanup();
+    process.exit(0);
+  });
+
+  process.stdin.resume();
+}
+
+main().catch((err) => {
+  console.error(chalk.red("Fatal error:"), err);
+  process.exit(1);
+});
